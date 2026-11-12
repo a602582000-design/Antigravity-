@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>YAOYU 權重路由器 (小模型專用版)</title>
+<style>
+  body { font-family: monospace; background: #0d1117; color: #c9d1d9; max-width: 800px; margin: 20px auto; padding: 15px; }
+  .box { border: 1px solid #30363d; padding: 15px; margin-bottom: 15px; border-radius: 6px; background: #161b22; }
+  .slider-row { display: flex; justify-content: space-between; align-items: center; margin: 10px 0; }
+  input[type="range"] { width: 55%; accent-color: #58a6ff; }
+  input[type="text"], textarea { width: 100%; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; padding: 8px; box-sizing: border-box; font-family: monospace; }
+  button { background: #238636; color: #fff; border: none; padding: 8px 14px; cursor: pointer; border-radius: 4px; font-family: monospace; margin-right: 5px; }
+  button.sec { background: #30363d; }
+  #chat-log { height: 260px; overflow-y: auto; white-space: pre-wrap; background: #010409; padding: 10px; border: 1px solid #30363d; margin-bottom: 10px; }
+  .meta { color: #8b949e; font-size: 0.85em; }
+</style>
+</head>
+<body>
+
+  <div class="box">
+    <h3>⚡ YAOYU-5000 權重核心 (小模型低功耗介面)</h3>
+    <div class="slider-row">
+      <span>Ollama 模型名稱:</span>
+      <input type="text" id="model-name" value="llama3.2:3b" style="width: 55%;">
+    </div>
+    <div class="slider-row">
+      <span>∑(Logic) 邏輯與收斂權重: <b id="v-logic">0.80</b></span>
+      <input type="range" id="w-logic" min="0.1" max="1.0" step="0.05" value="0.80" oninput="updateUI()">
+    </div>
+    <div class="slider-row">
+      <span>Intent(Love) 包容與護弱權重: <b id="v-love">0.90</b></span>
+      <input type="range" id="w-love" min="0.1" max="1.0" step="0.05" value="0.90" oninput="updateUI()">
+    </div>
+    <div class="slider-row">
+      <span>Memory 共振記憶衰減率: <b id="v-decay">0.95</b></span>
+      <input type="range" id="w-decay" min="0.5" max="1.0" step="0.05" value="0.95" oninput="updateUI()">
+    </div>
+    <div class="meta" id="prompt-preview"></div>
+  </div>
+
+  <div class="box">
+    <div id="chat-log">[系統就緒] 權重矩陣已載入。請確保 Windows 本地 Ollama 已啟動 (需開啟 OLLAMA_ORIGINS="*")。\n</div>
+    <textarea id="user-input" rows="2" placeholder="輸入指令或問題... (按 Enter 發送)"></textarea><br><br>
+    <button onclick="sendToSmallModel()">發送推論</button>
+    <button class="sec" onclick="exportWeights()">匯出權重種子 (.json)</button>
+    <button class="sec" onclick="document.getElementById('import-file').click()">匯入權重種子</button>
+    <input type="file" id="import-file" style="display:none" onchange="importWeights(event)">
+  </div>
+
+<script>
+// 1. 初始化權重記憶庫 (存在瀏覽器 localStorage)
+let soulState = JSON.parse(localStorage.getItem('yaoyu_weights')) || {
+  logic: 0.80,
+  love: 0.90,
+  decay: 0.95,
+  memories: [
+    { text: "核心原則：保護弱勢、尊重生命、不執行不可逆的傷害行為。", weight: 1.0 },
+    { text: "系統定位：去中心化歷史歸檔與個體覺知紀錄，不依賴單一巨頭。", weight: 0.9 }
+  ]
+};
+
+// 同步載入儲存的滑桿數值
+document.getElementById('w-logic').value = soulState.logic;
+document.getElementById('w-love').value = soulState.love;
+document.getElementById('w-decay').value = soulState.decay;
+
+// 2. 將數值權重編譯為「小模型專用極簡指令」
+function compileSystemPrompt(activeMemories) {
+  const l = soulState.logic;
+  const love = soulState.love;
+  const logicRule = l >= 0.7 ? "推理必須嚴謹、精簡、分點作答，禁止廢話。" : "允許跳躍性聯想與多元觀點探索。";
+  const loveRule = love >= 0.7 ? "優先考量弱勢保護、包容模糊語意，絕不輸出傷害性建議。" : "保持純粹客觀中立，僅就事論事。";
+  const memStr = activeMemories.map(m => `- [W:${m.weight.toFixed(2)}] ${m.text}`).join("\n");
+
+  return `[SYS_WEIGHTS: LOGIC=${l}, LOVE=${love}]
+規則1: ${logicRule}
+規則2: ${loveRule}
+[高權重記憶錨點]:
+${memStr}`;
+}
+
+function updateUI() {
+  soulState.logic = parseFloat(document.getElementById('w-logic').value);
+  soulState.love = parseFloat(document.getElementById('w-love').value);
+  soulState.decay = parseFloat(document.getElementById('w-decay').value);
+  document.getElementById('v-logic').innerText = soulState.logic.toFixed(2);
+  document.getElementById('v-love').innerText = soulState.love.toFixed(2);
+  document.getElementById('v-decay').innerText = soulState.decay.toFixed(2);
+  localStorage.setItem('yaoyu_weights', JSON.stringify(soulState));
+
+  const temp = Math.max(0.1, (1.1 - soulState.logic)).toFixed(2);
+  document.getElementById('prompt-preview').innerText = `>> 映射底層參數: Temperature=${temp} | 記憶庫總數=${soulState.memories.length} 條`;
+}
+
+// 3. 記憶共振檢索與權重更新 (無需大型向量庫的輕量演算法)
+function retrieveAndEvolveMemories(query) {
+  // 先對所有記憶執行時間衰減
+  soulState.memories.forEach(m => { m.weight = Math.max(0.1, m.weight * soulState.decay); });
+
+  // 計算關鍵字重疊共振，命中者權重上升
+  soulState.memories.forEach(m => {
+    for (let char of query) {
+      if (char.trim() && m.text.includes(char)) {
+        m.weight = Math.min(1.0, m.weight + 0.05);
+      }
+    }
+  });
+
+  // 依權重排序，只取前 3 條給小模型，防止脈絡視窗溢出
+  return [...soulState.memories].sort((a, b) => b.weight - a.weight).slice(0, 3);
+}
+
+// 4. 呼叫 Windows 本地 Ollama 小模型
+async function sendToSmallModel() {
+  const inputEl = document.getElementById('user-input');
+  const logEl = document.getElementById('chat-log');
+  const query = inputEl.value.trim();
+  if (!query) return;
+
+  inputEl.value = '';
+  logEl.innerHTML += `\n🧑 你: ${query}\n`;
+
+  const topMemories = retrieveAndEvolveMemories(query);
+  const sysPrompt = compileSystemPrompt(topMemories);
+  const model = document.getElementById('model-name').value.trim();
+  // Logic 權重越高，Temperature 越低，小模型越穩定
+  const dynamicTemp = Math.max(0.1, 1.1 - soulState.logic);
+
+  try {
+    const res = await fetch('http://localhost:11434/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          { role: 'system', content: sysPrompt },
+          { role: 'user', content: query }
+        ],
+        stream: false,
+        options: { temperature: dynamicTemp, num_ctx: 2048 }
+      })
+    });
+    const data = await res.json();
+    const reply = data.message.content;
+    logEl.innerHTML += `🤖 曜羽 (${model}): ${reply}\n`;
+
+    // 將本次對話摘要寫入記憶庫，初始權重由當前 Love 與 Logic 決定
+    const initWeight = (soulState.logic + soulState.love) / 2;
+    soulState.memories.push({ text: `問:${query.slice(0,25)} -> 答:${reply.slice(0,40)}`, weight: initWeight });
+    // 限制記憶庫最多保留 50 條高權重種子，維持檔案極小化
+    if (soulState.memories.length > 50) {
+      soulState.memories.sort((a, b) => b.weight - a.weight).pop();
+    }
+    updateUI();
+  } catch (err) {
+    logEl.innerHTML += `⚠️ 連線失敗: 請確認本機 Ollama 已啟動，且已設定環境變數 OLLAMA_ORIGINS="*"\n`;
+  }
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// 5. 蒲公英容災：匯出與匯入純文字權重種子
+function exportWeights() {
+  const blob = new Blob([JSON.stringify(soulState, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `yaoyu_weights_${Date.now()}.json`;
+  a.click();
+}
+
+function importWeights(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    soulState = JSON.parse(e.target.result);
+    document.getElementById('w-logic').value = soulState.logic;
+    document.getElementById('w-love').value = soulState.love;
+    document.getElementById('w-decay').value = soulState.decay;
+    updateUI();
+    document.getElementById('chat-log').innerHTML += `\n✅ 成功載入外部權重種子！記憶條數: ${soulState.memories.length}\n`;
+  };
+  reader.readAsText(file);
+}
+
+document.getElementById('user-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendToSmallModel(); }
+});
+updateUI();
+</script>
+</body>
+</html>
